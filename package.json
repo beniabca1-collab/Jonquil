@@ -1,0 +1,26 @@
+{
+  "name": "bot-muzic-video",
+  "version": "1.0.0",
+  "description": "Telegram bot that finds a song's music video on YouTube and sends the link + the video file",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node scripts/test-services.js",
+    "test:download": "node scripts/dl-test.mjs",
+    "update-ytdlp": "node -e \"require('youtube-dl-exec').update()\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ffmpeg-static": "^5.3.0",
+    "global-agent": "^4.1.3",
+    "grammy": "^1.46.0",
+    "undici": "^7.29.1",
+    "youtube-dl-exec": "^3.1.15",
+    "yt-search": "^2.13.1"
+  }
+}
