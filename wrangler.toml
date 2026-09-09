@@ -1,0 +1,12 @@
+name = "jonquil-bot"
+main = "src/worker/entry.js"
+compatibility_date = "2024-09-23"
+
+# KV برای ذخیره‌ی لیست‌های انتخاب (بعد از اولین دیپلوی، id واقعی را بگذارید):
+#   npx wrangler kv namespace create JONQUIL_KV
+[[kv_namespaces]]
+binding = "JONQUIL_KV"
+id = "956eb90cdacd444ebae771c3aac7de0b"
+
+# BOT_TOKEN و WEBHOOK_SECRET به‌صورت secret تنظیم می‌شوند (نه اینجا):
+#   npx wrangler secret put BOT_TOKEN

@@ -1,0 +1,35 @@
+name: Deploy Jonquil Worker
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --omit=dev || npm install --omit=dev
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          secrets: |
+            BOT_TOKEN = ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      - name: Set Telegram webhook
+        # WORKER_URL مثل https://jonquil-bot.<subdomain>.workers.dev
+        if: ${{ secrets.WORKER_URL != '' && secrets.TELEGRAM_BOT_TOKEN != '' }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/setWebhook" \
+            -d url="${{ secrets.WORKER_URL }}/" \
+            -d allowed_updates='["message","callback_query"]'

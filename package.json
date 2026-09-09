@@ -9,6 +9,7 @@
     "test": "node scripts/test-services.js",
     "test:download": "node scripts/dl-test.mjs",
     "test:lore": "node scripts/lore-test.mjs",
+    "test:worker-search": "node scripts/worker-search-test.mjs",
     "update-ytdlp": "node -e \"require('youtube-dl-exec').update()\""
   },
   "engines": {

@@ -68,3 +68,28 @@ src/
 - **پیام‌های لور «نسرین/jonquil»:** استخر ~۸۰ پیامه‌ی کوتاه در `src/services/lore.js` (فارسی + چند انگلیسی)، با فرمت HTML تلگرام (`<i>`، `<blockquote>`، `<tg-spoiler>`، `<blockquote expandable>`) و چرخش بدون تکرار (deck شافل). ادیت‌های پیام با حداقل ۵ ثانیه فاصله throttle می‌شن (محدودیت rate تلگرام).
 - **yt-dlp + ffmpeg-static:** هر دو باینری به‌صورت خودکار با `npm install` دانلود می‌شن و نیازی به نصب سراسری ندارن. برای به‌روزرسانی yt-dlp (اگه یوتیوب تغییرش داد): `npm run update-ytdlp`.
 - نیازی به کلید YouTube Data API نیست.
+
+## ☁️ دیپلوی روی Cloudflare Workers (نسخه‌ی لینک‌محور)
+
+نسخه‌ی Workers در `src/worker/` است و به‌جای فایل ویدیو، «لینک + تامبنیل» می‌فرستد
+(Workers اجازه‌ی اجرای ffmpeg / yt-dlp ندارد). همه‌ی متن‌ها و لورها همان نسخه‌ی نود هستند.
+
+1. KV بسازید و `id` را در `wrangler.toml` بگذارید:
+   ```bash
+   npx wrangler kv namespace create JONQUIL_KV
+   ```
+2. ریپو را به GitHub پوش کنید و در **Settings → Secrets → Actions** این‌ها را بسازید:
+   - `CLOUDFLARE_API_TOKEN` — توکن با پرمیشن *Edit Cloudflare Workers*
+   - `CLOUDFLARE_ACCOUNT_ID`
+   - `TELEGRAM_BOT_TOKEN`
+   - `WORKER_URL` — مثل `https://jonquil-bot.<subdomain>.workers.dev`
+3. هر push به `main` → اکشن `.github/workflows/deploy.yml` اوتوماتیک دیپلوی می‌کند
+   و webhook تلگرام را ست می‌کند.
+
+### تست جستجوی نسخه‌ی Workers (لوکال)
+
+```bash
+npm run test:worker-search
+```
+
+- نیازی به کلید YouTube Data API نیست.
