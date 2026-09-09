@@ -10,6 +10,9 @@ export const MAX_FILE_SIZE = 49 * 1024 * 1024;
 /** بیشینه‌ی طول ویدیو برای دانلود و ارسال فایل (۱۵ دقیقه) */
 export const MAX_DURATION_SECONDS = 15 * 60;
 
+/** حداقل فاصله‌ی زمانی بین ادیت‌های پیام لور/پیشرفت (محدودیت rate تلگرام) */
+export const LORE_EDIT_MIN_MS = 5 * 1000;
+
 /** تعداد گزینه‌هایی که وقتی ویدیوی رسمی نبود نمایش داده می‌شود */
 export const SEARCH_LIMIT = 10;
 

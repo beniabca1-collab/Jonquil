@@ -6,8 +6,9 @@ import { getVideoInfo, pickFormat, downloadVideo, formatTitle, formatDuration, f
 import { downloadThumbnail } from '../services/thumbnail.js';
 import { selectionStore } from '../services/selection-store.js';
 import { buildSelectionKeyboard } from '../keyboards.js';
+import { nextLore, loreSignoff } from '../services/lore.js';
 import { escapeHtml, truncate } from '../utils.js';
-import { TEMP_DIR, MAX_FILE_SIZE, MAX_DURATION_SECONDS, ensureTempDir } from '../config.js';
+import { TEMP_DIR, MAX_FILE_SIZE, MAX_DURATION_SECONDS, LORE_EDIT_MIN_MS, ensureTempDir } from '../config.js';
 
 /* ------------------------------------------------------------------ */
 /*  مرحله ۱: جستجو و تصمیم‌گیری                                        */
@@ -25,7 +26,10 @@ export async function handleSongRequest(ctx, rawQuery) {
     return;
   }
 
-  const status = await ctx.reply(`🔎 دارم دنبال «${truncate(query, 60)}» می‌گردم...`);
+  const status = await ctx.reply(
+    `🔎 دارم دنبال «${escapeHtml(truncate(query, 60))}» می‌گردم...\n\n${nextLore()}`,
+    { parse_mode: 'HTML' }
+  );
 
   let videos;
   try {
@@ -47,7 +51,12 @@ export async function handleSongRequest(ctx, rawQuery) {
   const official = findOfficialVideo(videos.slice(0, 3));
   if (official) {
     await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, '🎬 موزیک ویدیو پیدا شد! دارم آماده‌اش می‌کنم...')
+      .editMessageText(
+        ctx.chat.id,
+        status.message_id,
+        `🎬 موزیک ویدیو پیدا شد! دارم آماده‌اش می‌کنم...\n\n${nextLore()}`,
+        { parse_mode: 'HTML' }
+      )
       .catch(() => {});
     await sendVideo(ctx, official.videoId);
     return;
@@ -160,21 +169,35 @@ async function sendVideo(ctx, videoId) {
   // ۲) دانلود و ارسال فایل ویدیو
   ensureTempDir();
   const filePath = path.join(TEMP_DIR, `video_${videoId}.mp4`);
-  const progressMsg = await ctx.reply('⏬ دانلود: 0%');
+  const progressMsg = await ctx.reply(`${nextLore()}\n⏬ 0%`, { parse_mode: 'HTML' });
   let lastPct = 0;
+  let lastEditAt = Date.now();
+
+  const renderProgress = (pct) =>
+    ctx.api
+      .editMessageText(ctx.chat.id, progressMsg.message_id, `${nextLore()}\n⏬ ${pct}%`, {
+        parse_mode: 'HTML',
+      })
+      .catch(() => {});
 
   try {
     const finalPath = await downloadVideo(info, format, filePath, (pct) => {
-      if (pct - lastPct >= 25) {
+      const now = Date.now();
+      // هر ۲۵٪ + حداقل ۵ ثانیه فاصله بین ادیت‌ها (محدودیت rate تلگرام)
+      if (pct - lastPct >= 25 && now - lastEditAt >= LORE_EDIT_MIN_MS) {
         lastPct = pct;
-        ctx.api
-          .editMessageText(ctx.chat.id, progressMsg.message_id, `⏬ دانلود: ${pct}%`)
-          .catch(() => {});
+        lastEditAt = now;
+        renderProgress(pct);
       }
     });
 
+    // اگر دانلود سریع بود و هنوز پیشرفتی نمایش داده نشده، یه لور تازه با ۱۰۰٪
+    if (lastPct < 100) await renderProgress(100);
+
     await ctx.api
-      .editMessageText(ctx.chat.id, progressMsg.message_id, '📤 در حال ارسال ویدیو...')
+      .editMessageText(ctx.chat.id, progressMsg.message_id, `${nextLore()}\n📤 در حال ارسال ویدیو...`, {
+        parse_mode: 'HTML',
+      })
       .catch(() => {});
 
     const size = fs.statSync(finalPath).size;
@@ -186,7 +209,7 @@ async function sendVideo(ctx, videoId) {
     await ctx.replyWithVideo(
       new InputFile(finalPath, `${truncate(title, 60).replace(/[\\/:*?"<>|]/g, '')}.mp4`),
       {
-        caption: `🎬 ${escapeHtml(truncate(title, 200))}\n🔗 ${url}`,
+        caption: `🎬 ${escapeHtml(truncate(title, 200))}\n🔗 ${url}${loreSignoff()}`,
         parse_mode: 'HTML',
         supports_streaming: true,
       }

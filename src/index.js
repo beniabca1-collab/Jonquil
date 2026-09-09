@@ -8,6 +8,7 @@ import {
   queryFromMedia,
   queryFromText,
 } from './handlers/song.js';
+import { nextLore } from './services/lore.js';
 import { ensureTempDir, cleanupTempDir } from './config.js';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -33,7 +34,9 @@ bot.command('start', (ctx) =>
     '👋 سلام!\n' +
       '🎵 اسم آهنگ رو برام بنویس یا فایل صوتیش رو بفرست،\n' +
       'من موزیک ویدیوش رو از یوتیوب پیدا می‌کنم و هم لینک و هم خود ویدیو رو برات می‌فرستم 🎬\n\n' +
-      'اگه ویدیوی رسمی نداشته باشه، ۱۰ تا ویدیوی مرتبط نشونت می‌دم که خودت انتخاب کنی 😉'
+      'اگه ویدیوی رسمی نداشته باشه، ۱۰ تا ویدیوی مرتبط نشونت می‌دم که خودت انتخاب کنی 😉\n\n' +
+      nextLore(),
+    { parse_mode: 'HTML' }
   )
 );
 
