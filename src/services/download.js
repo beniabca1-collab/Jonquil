@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import ffmpegPath from 'ffmpeg-static';
 import { PROXY_URL } from './proxy.js';
 
-/** فرمت هدف: ویدیوی mp4 تا ۳۶۰p + بهترین صدا، ادغام‌شده با ffmpeg */
+/** فرمت هدف: ویدیوی mp4 تا ۷۲۰p + بهترین صدا، ادغام‌شده با ffmpeg */
 const FORMAT_SPEC =
-  'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=480]/best';
+  'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best';
 
 function baseFlags() {
   return {
@@ -41,7 +41,7 @@ export function formatChannel(info) {
 export function formatSize(info, format) {
   const formats = info?.formats ?? [];
   const video = formats
-    .filter((f) => f.vcodec !== 'none' && f.acodec === 'none' && (f.height ?? 0) <= 360)
+    .filter((f) => f.vcodec !== 'none' && f.acodec === 'none' && (f.height ?? 0) <= 720)
     .sort((a, b) => (b.filesize ?? 0) - (a.filesize ?? 0))[0];
   const audio = formats
     .filter((f) => f.acodec !== 'none' && f.vcodec === 'none')

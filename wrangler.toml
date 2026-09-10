@@ -2,6 +2,9 @@ name = "jonquil-bot"
 main = "src/worker/entry.js"
 compatibility_date = "2024-09-23"
 
+[observability]
+enabled = true
+
 # KV برای ذخیره‌ی لیست‌های انتخاب (بعد از اولین دیپلوی، id واقعی را بگذارید):
 #   npx wrangler kv namespace create JONQUIL_KV
 [[kv_namespaces]]

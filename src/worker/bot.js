@@ -95,7 +95,7 @@ export function createWorkerBot(env) {
     } catch (err) {
       console.error('sendVideoFile fallback to link:', err?.message ?? err);
       if (status) await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {});
-      await sendLink(ctx, video);
+      await sendLink(ctx, video, `⚠️ ارسال فایل ناموفق بود: <code>${escapeHtml(String(err?.message ?? err).slice(0, 120))}</code>\n`);
     }
   }
 
@@ -104,7 +104,7 @@ export function createWorkerBot(env) {
     const caption =
       `🎬 <b>${escapeHtml(truncate(video.title, 120))}</b>\n` +
       `👤 ${escapeHtml(truncate(video.author?.name ?? '', 80))}\n` +
-      `🔗 ${video.url}${loreSignoff()}${SEND}`;
+      `🔗 ${video.url}\n${extraText}${loreSignoff()}${SEND}`;
     await ctx
       .replyWithPhoto(video.thumbnail ?? `https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg`, {
         caption,

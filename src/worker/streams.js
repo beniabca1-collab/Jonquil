@@ -10,39 +10,46 @@ const CLIENTS = [
     name: 'ANDROID_VR',
     ctx: {
       clientName: 'ANDROID_VR',
-      clientVersion: '1.60.19',
+      clientVersion: '1.65.10',
       deviceMake: 'Oculus',
       deviceModel: 'Quest 3',
       androidSdkVersion: 32,
       osName: 'Android',
       osVersion: '12L',
+      userAgent:
+        'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
       hl: 'en',
       gl: 'US',
     },
   },
   {
-    name: 'ANDROID_VR_NEW',
+    name: 'IOS',
     ctx: {
-      clientName: 'ANDROID_VR',
-      clientVersion: '1.61.48',
-      deviceMake: 'Oculus',
-      deviceModel: 'Quest 3',
-      androidSdkVersion: 32,
+      clientName: 'IOS',
+      clientVersion: '21.26.4',
+      deviceMake: 'Apple',
+      deviceModel: 'iPhone16,2',
+      osName: 'iPhone',
+      osVersion: '18.3.2.22D82',
+      userAgent:
+        'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+      hl: 'en',
+      gl: 'US',
+    },
+  },
+  {
+    name: 'ANDROID',
+    ctx: {
+      clientName: 'ANDROID',
+      clientVersion: '21.26.364',
+      androidSdkVersion: 30,
       osName: 'Android',
-      osVersion: '12L',
+      osVersion: '11',
+      userAgent:
+        'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
       hl: 'en',
       gl: 'US',
     },
-  },
-  {
-    name: 'EMBED',
-    ctx: {
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
-      hl: 'en',
-      gl: 'US',
-    },
-    thirdParty: { embedUrl: 'https://www.youtube.com/' },
   },
 ];
 
@@ -94,11 +101,65 @@ function extractMuxed(data) {
 }
 
 /**
- * فرمت‌های muxed یک ویدیو را برمی‌گرداند؛ کلاینت‌ها را به ترتیب امتحان می‌کند.
+ * رله‌های عمومی Piped: ویدیو را از سرورهای خودشان پروکسی می‌کنند
+ * (برای وقتی یوتیوب به IP دیتاسنتر PO Token می‌خواهد).
+ */
+const PIPED_RELAYS = [
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.private.coffee',
+  'https://pipedapi.reallyaweso.me',
+  'https://pipedapi.ducks.party',
+];
+
+async function relayMuxed(videoId) {
+  for (const base of PIPED_RELAYS) {
+    try {
+      const res = await withTimeoutFetch(`${base}/streams/${videoId}`, 8_000);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error) continue;
+      const formats = (data.videoStreams ?? [])
+        .filter((s) => s.url && s.videoOnly === false && /\d+p/.test(s.quality ?? ''))
+        .map((s) => ({
+          itag: s.itag ?? 0,
+          url: s.url,
+          qualityLabel: s.quality ?? 'video',
+          height: parseInt(s.quality, 10) || 0,
+          bitrate: 0,
+          contentLength: 0,
+        }))
+        .sort((a, b) => b.height - a.height);
+      if (formats.length > 0) {
+        return {
+          title: data.title ?? '',
+          durationSeconds: Number(data.duration ?? 0),
+          formats,
+          via: `piped:${new URL(base).hostname}`,
+        };
+      }
+    } catch {
+      /* اینستنس بعدی */
+    }
+  }
+  throw new Error('all relays failed');
+}
+
+async function withTimeoutFetch(url, ms) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    return await fetch(url, { signal: ac.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * فرمت‌های muxed یک ویدیو را برمی‌گرداند؛ اول InnerTube، بعد رله‌های Piped.
  * خروجی: { title, durationSeconds, formats, via } یا خطا اگر هیچ‌کدام نشد.
  */
 export async function getMuxedFormats(videoId) {
-  let lastErr = new Error('no client succeeded');
+  let lastErr = new Error('no source succeeded');
   for (const client of CLIENTS) {
     try {
       const data = await playerRequest(videoId, client);
@@ -109,12 +170,38 @@ export async function getMuxedFormats(videoId) {
       lastErr = err;
     }
   }
-  throw lastErr;
+  try {
+    return await relayMuxed(videoId);
+  } catch (err) {
+    throw new Error(`${lastErr.message} | ${err.message}`);
+  }
 }
 
 /** بهترین فرمت موجود (از بالاترین کیفیت؛ سقف حجم در حین دانلود چک می‌شود) */
 export function pickVideoFormat(formats) {
   return (formats ?? [])[0] ?? null;
+}
+
+/** دیباگ: خروجی خام یک کلاینت خاص (برای مسیر /debug-video) */
+export async function debugClient(videoId, clientName) {
+  const client = CLIENTS.find((c) => c.name === clientName) ?? CLIENTS[0];
+  const data = await playerRequest(videoId, client);
+  const ps = data.playabilityStatus ?? {};
+  let formats = [];
+  try {
+    formats = extractMuxed(data).formats;
+  } catch {
+    /* ویدیو پخش‌پذیر نیست؛ فقط وضعیت را برمی‌گردانیم */
+  }
+  return {
+    via: client.name,
+    playability: ps.status ?? 'UNKNOWN',
+    reason: ps.reason ?? null,
+    durationSeconds: Number(
+      data.microformat?.playerMicroformatRenderer?.lengthSeconds ?? 0
+    ),
+    formats,
+  };
 }
 
 /**
