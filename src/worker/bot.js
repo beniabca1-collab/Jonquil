@@ -3,7 +3,7 @@
  * پیام‌ها و لورها دقیقاً همان متن‌های نسخه‌ی نود هستند؛ فقط ارسال
  * به‌صورت «لینک + تامبنیل» انجام می‌شود (Workers نمی‌تواند ffmpeg اجرا کند).
  */
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { nextLore, loreSignoff } from '../services/lore.js';
 import { escapeHtml, truncate, withTimeout } from '../utils.js';
 import {
@@ -12,20 +12,26 @@ import {
   cleanQuery,
   fileNameToQuery,
 } from './search.js';
+import {
+  getMuxedFormats,
+  pickVideoFormat,
+  downloadVideo,
+  MAX_DURATION_SECONDS,
+} from './streams.js';
 import { createKvStore } from './store.js';
 
 export function createWorkerBot(env) {
   const bot = new Bot(env.BOT_TOKEN);
   const selectionStore = createKvStore(env.JONQUIL_KV);
 
-  const SEND = '\n\n⚠️ نسخه‌ی کلادفلر ویدیو رو دانلود نمی‌کنه؛ لینکش رو برات می‌فرسته 🎬';
+  const SEND = '\n\n⚠️ کیفیت بر اساس محدودیت تلگرام (۵۰MB) انتخاب می‌شه 🎬';
 
   /* ------------------- /start و /help ------------------- */
   bot.command('start', (ctx) =>
     ctx.reply(
       '👋 سلام!\n' +
         '🎵 اسم آهنگ رو برام بنویس،\n' +
-        'من موزیک ویدیوش رو از یوتیوب پیدا می‌کنم و لینکش رو برات می‌فرستم 🎬\n\n' +
+        'من موزیک ویدیوش رو از یوتیوب پیدا می‌کنم و <b>خود ویدیو</b> رو برات می‌فرستم 🎬\n\n' +
         'اگه ویدیوی رسمی نداشته باشه، ۱۰ تا ویدیوی مرتبط نشونت می‌دم که خودت انتخاب کنی 😉\n\n' +
         nextLore(),
       { parse_mode: 'HTML' }
@@ -36,15 +42,64 @@ export function createWorkerBot(env) {
     ctx.reply(
       '📖 <b>راهنما</b>\n\n' +
         '• اسم آهنگ + خواننده رو تایپ کن:\nمثلاً <code>Gorgon City Gone Missing</code>\n\n' +
-        '• لینک یوتیوب هم بفرستی، لینک مستقیم همون ویدیو رو برات می‌آرم.\n\n' +
-        '⚠️ این نسخه فایل ویدیو نمی‌فرسته؛ لینک + تامبنیل ارسال می‌شه.',
+        '• لینک یوتیوب هم بفرستی، همون ویدیو رو برات می‌فرستم.\n\n' +
+        '• فایل ویدیو با بهترین فرمت ترکیبی (صدا+تصویر) یوتیوب و حداکثر ۴۵MB ارسال می‌شه؛\nاگه بزرگ‌تر از سقف تلگرام بود، فقط لینکش رو می‌فرستم.',
       { parse_mode: 'HTML' }
     )
   );
 
   /* ------------------- کمکی‌ها ------------------- */
 
-  /** ارسال نتیجه به شکل لینک + تامبنیل */
+  /** ارسال فایل ویدیو با بالاترین فرمت muxed موجود؛ اگر نشد → لینک + تامبنیل */
+  async function sendVideoFile(ctx, video, statusMsg = null) {
+    let status = statusMsg;
+    try {
+      if (!status) {
+        status = await ctx.reply(
+          `🎬 دارم «${escapeHtml(truncate(video.title ?? '', 60))}» رو آماده می‌کنم...\n\n${nextLore()}`
+        );
+      } else {
+        await ctx.api
+          .editMessageText(
+            ctx.chat.id,
+            status.message_id,
+            `🎬 پیدا شد! دارم بهترین کیفیت رو آماده می‌کنم...\n\n${nextLore()}`
+          )
+          .catch(() => {});
+      }
+
+      const { durationSeconds, formats, via } = await getMuxedFormats(video.videoId);
+      if (durationSeconds && durationSeconds > MAX_DURATION_SECONDS) {
+        throw new Error(`too long (${durationSeconds}s)`);
+      }
+      const fmt = pickVideoFormat(formats);
+      if (!fmt) throw new Error('no muxed format');
+
+      const dl = await withTimeout(downloadVideo(fmt.url), 110_000, 'download timeout');
+      if (!dl) throw new Error(`bigger than telegram limit (${fmt.qualityLabel})`);
+
+      const caption =
+        `🎬 <b>${escapeHtml(truncate(video.title || '', 120))}</b>\n` +
+        `👤 ${escapeHtml(truncate(video.author?.name ?? '', 80))}\n` +
+        `🎞 ${escapeHtml(fmt.qualityLabel)} • ${(dl.bytes / 1048576).toFixed(1)}MB\n` +
+        `🔗 ${video.url}${loreSignoff()}${SEND}`;
+
+      const safeName = `${truncate((video.title || 'jonquil').replace(/[\\/:*?"<>|]/g, ''), 60)}.mp4`;
+      await ctx.replyWithVideo(new InputFile(dl.blob, safeName), {
+        caption,
+        parse_mode: 'HTML',
+        supports_streaming: true,
+      });
+      if (status) await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {});
+      console.log(`video sent: ${video.videoId} via=${via} ${fmt.qualityLabel} ${(dl.bytes / 1048576).toFixed(1)}MB`);
+    } catch (err) {
+      console.error('sendVideoFile fallback to link:', err?.message ?? err);
+      if (status) await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {});
+      await sendLink(ctx, video);
+    }
+  }
+
+  /** ارسال نتیجه به شکل لینک + تامبنیل (fallback) */
   async function sendLink(ctx, video, extraText = '') {
     const caption =
       `🎬 <b>${escapeHtml(truncate(video.title, 120))}</b>\n` +
@@ -136,7 +191,7 @@ export function createWorkerBot(env) {
           { parse_mode: 'HTML' }
         )
         .catch(() => {});
-      await sendLink(ctx, official);
+      await sendVideoFile(ctx, official, status);
       return;
     }
 
@@ -144,7 +199,7 @@ export function createWorkerBot(env) {
   }
 
   async function handleVideoLink(ctx, videoId) {
-    await sendLink(ctx, {
+    await sendVideoFile(ctx, {
       videoId,
       url: `https://www.youtube.com/watch?v=${videoId}`,
       title: 'ویدیوی موردنظرت',
@@ -217,7 +272,7 @@ export function createWorkerBot(env) {
     await ctx.editMessageText(`✅ انتخاب شد: ${escapeHtml(truncate(video.title, 80))}`, {
       parse_mode: 'HTML',
     }).catch(() => {});
-    await sendLink(ctx, video);
+    await sendVideoFile(ctx, video);
   });
 
   return bot;
