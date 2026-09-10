@@ -5,6 +5,16 @@
  */
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { nextLore, loreSignoff } from '../services/lore.js';
+import {
+  welcomeText,
+  helpText,
+  searchingText,
+  foundText,
+  noOfficialText,
+  deliveredCaption,
+  stickerIds,
+  sendEphemeralSticker,
+} from '../services/persona.js';
 import { escapeHtml, truncate, withTimeout } from '../utils.js';
 import {
   searchYouTube,
@@ -23,27 +33,23 @@ import { createKvStore } from './store.js';
 export function createWorkerBot(env) {
   const bot = new Bot(env.BOT_TOKEN);
   const selectionStore = createKvStore(env.JONQUIL_KV);
+  // شناسه‌ی استیکرها از ورکر env/vars (نه secret) خوانده می‌شن؛ خالی = بدون استیکر
+  const S = stickerIds(env);
+  const OWNER_ID = env.OWNER_ID ? Number(env.OWNER_ID) : 0;
+  // اگه OWNER_ID ست نشده باشه، حالت یادگیری غیرفعاله تا نسرین پیام فنی نبینه.
+  const isOwner = (ctx) => Boolean(OWNER_ID) && ctx.from?.id === OWNER_ID;
 
   const SEND = '\n\n⚠️ کیفیت بر اساس محدودیت تلگرام (۵۰MB) انتخاب می‌شه 🎬';
 
   /* ------------------- /start و /help ------------------- */
-  bot.command('start', (ctx) =>
-    ctx.reply(
-      '👋 سلام!\n' +
-        '🎵 اسم آهنگ رو برام بنویس،\n' +
-        'من موزیک ویدیوش رو از یوتیوب پیدا می‌کنم و <b>خود ویدیو</b> رو برات می‌فرستم 🎬\n\n' +
-        'اگه ویدیوی رسمی نداشته باشه، ۱۰ تا ویدیوی مرتبط نشونت می‌دم که خودت انتخاب کنی 😉\n\n' +
-        nextLore(),
-      { parse_mode: 'HTML' }
-    )
-  );
+  bot.command('start', async (ctx) => {
+    await sendEphemeralSticker(ctx, S.hello, 9000);
+    await ctx.reply(welcomeText() + '\n\n' + nextLore(), { parse_mode: 'HTML' });
+  });
 
   bot.command('help', (ctx) =>
     ctx.reply(
-      '📖 <b>راهنما</b>\n\n' +
-        '• اسم آهنگ + خواننده رو تایپ کن:\nمثلاً <code>Gorgon City Gone Missing</code>\n\n' +
-        '• لینک یوتیوب هم بفرستی، همون ویدیو رو برات می‌فرستم.\n\n' +
-        '• فایل ویدیو با بهترین فرمت ترکیبی (صدا+تصویر) یوتیوب و حداکثر ۴۵MB ارسال می‌شه؛\nاگه بزرگ‌تر از سقف تلگرام بود، فقط لینکش رو می‌فرستم.',
+      helpText(),
       { parse_mode: 'HTML' }
     )
   );
@@ -79,7 +85,7 @@ export function createWorkerBot(env) {
       if (!dl) throw new Error(`bigger than telegram limit (${fmt.qualityLabel})`);
 
       const caption =
-        `🎬 <b>${escapeHtml(truncate(video.title || '', 120))}</b>\n` +
+        `${deliveredCaption()}\n\n🎬 <b>${escapeHtml(truncate(video.title || '', 120))}</b>\n` +
         `👤 ${escapeHtml(truncate(video.author?.name ?? '', 80))}\n` +
         `🎞 ${escapeHtml(fmt.qualityLabel)} • ${(dl.bytes / 1048576).toFixed(1)}MB\n` +
         `🔗 ${video.url}${loreSignoff()}${SEND}`;
@@ -121,7 +127,7 @@ export function createWorkerBot(env) {
       .editMessageText(
         ctx.chat.id,
         statusMsgId,
-        '🎬 موزیک ویدیوی رسمی براش پیدا نکردم.\n⏳ چند تا ویدیوی مرتبط برات می‌فرستم که انتخاب کنی...'
+        noOfficialText()
       )
       .catch(() => {});
 
@@ -146,7 +152,7 @@ export function createWorkerBot(env) {
     await ctx.api.editMessageText(
       ctx.chat.id,
       statusMsgId,
-      `🎬 یکی از اینا رو انتخاب کن:\n\n${list}\n\n${nextLore()}`,
+      `ببین کدومش همونیه که تو ذهنته 👇\n\n${list}\n\n${nextLore()}`,
       { parse_mode: 'HTML', reply_markup: kb }
     );
   }
@@ -156,12 +162,12 @@ export function createWorkerBot(env) {
   async function handleSongRequest(ctx, rawQuery) {
     const query = cleanQuery(rawQuery);
     if (!query) {
-      await ctx.reply('🎵 لطفاً اسم آهنگ رو بنویس.');
+      await ctx.reply('یه اسم آهنگ بهم بده، منم مثل برق می‌رم دنبالش 🎧');
       return;
     }
 
     const status = await ctx.reply(
-      `🔎 دارم دنبال «${escapeHtml(truncate(query, 60))}» می‌گردم...\n\n${nextLore()}`,
+      searchingText(query, escapeHtml, truncate, nextLore),
       { parse_mode: 'HTML' }
     );
 
@@ -170,13 +176,13 @@ export function createWorkerBot(env) {
       videos = await withTimeout(searchYouTube(query, 10), 25_000, 'جستجوی یوتیوب طول کشید');
     } catch {
       await ctx.api
-        .editMessageText(ctx.chat.id, status.message_id, '❌ جستجو در یوتیوب ناموفق بود. دوباره تلاش کن.')
+        .editMessageText(ctx.chat.id, status.message_id, 'اینترنت یوتیوب یه لحظه لجبازی کرد 😅 یه بار دیگه بفرست')
         .catch(() => {});
       return;
     }
     if (videos.length === 0) {
       await ctx.api
-        .editMessageText(ctx.chat.id, status.message_id, '😕 هیچ نتیجه‌ای پیدا نشد. اسم آهنگ رو دقیق‌تر بنویس.')
+        .editMessageText(ctx.chat.id, status.message_id, 'هیچی پیدا نکردم 😕 اسم آهنگ + خواننده رو دقیق‌تر بنویس، دوباره می‌گردم')
         .catch(() => {});
       return;
     }
@@ -187,7 +193,7 @@ export function createWorkerBot(env) {
         .editMessageText(
           ctx.chat.id,
           status.message_id,
-          `🎬 موزیک ویدیوی رسمی رو پیدا کردم!\n\n${nextLore()}`,
+          foundText(nextLore),
           { parse_mode: 'HTML' }
         )
         .catch(() => {});
@@ -218,12 +224,30 @@ export function createWorkerBot(env) {
       } else if (t) {
         await handleSongRequest(ctx, fileNameToQuery(t));
       } else {
-        await ctx.reply('🎵 لطفاً اسم آهنگ رو بنویس.');
+        await ctx.reply('یه اسم آهنگ بهم بده، منم مثل برق می‌رم دنبالش 🎧');
       }
     } catch (err) {
       console.error('text handler error:', err);
-      await ctx.reply('😅 یه خطایی پیش اومد. دوباره امتحان کن.');
+      await sendEphemeralSticker(ctx, S.sorry, 8000);
+      await ctx.reply('اوپس 😅 یه‌جا گیر کردم... یه بار دیگه بگو چی می‌خوای؟');
     }
+  });
+
+  // استیکر: فقط برای یادگیری از طرف صاحب بات (file_id رو لاگ می‌کنه)
+  bot.on('message:sticker', async (ctx) => {
+    if (!isOwner(ctx)) return;
+    const f = ctx.message.sticker;
+    console.log(`[sticker-learn] emoji=${f.emoji ?? '?'} animated=${f.is_animated} video=${f.is_video} file_id=${f.file_id} set=${f.set_name ?? '-'}`);
+    await ctx.reply(
+      'یاد گرفتم! ✅\n' +
+        `این file_id رو بذار توی vars ورکر:\n<code>${f.file_id}</code>\n\n` +
+        '• سلام → <code>STICKER_HELLO</code>\n' +
+        '• پیدا شد → <code>STICKER_FOUND</code>\n' +
+        '• معذرت → <code>STICKER_SORRY</code>\n' +
+        '• گل نرگس 🌼 → <code>STICKER_FLOWER</code>\n\n' +
+        'دستور: <code>npx wrangler secret put ...</code> نه! این‌ها vars هستن — توی داشبورد ورکر یا wrangler.toml بذار.',
+      { parse_mode: 'HTML' }
+    );
   });
 
   // فایل صوتی/ویس با کپشن: اسمش رو از کپشن یا فایل‌نیم می‌خوانیم
@@ -232,14 +256,14 @@ export function createWorkerBot(env) {
     const fileName = ctx.message.document?.file_name ?? '';
     const query = cleanQuery(fileNameToQuery(ctx.message.caption ?? fileName));
     if (!query) {
-      await ctx.reply('🤔 نتونستم اسم آهنگ رو از فایل بفهمم. اسم آهنگ + خواننده رو تایپ کن لطفاً.');
+      await ctx.reply('اسم این فایل رو نفهمیدم 🤔 اسم آهنگ + خواننده رو تایپ کن، خودم پیداش می‌کنم.');
       return;
     }
     try {
       await handleSongRequest(ctx, query);
     } catch (err) {
       console.error('media handler error:', err);
-      await ctx.reply('😅 یه خطایی پیش اومد. دوباره امتحان کن.');
+      await ctx.reply('اوپس 😅 یه‌جا گیر کردم... یه بار دیگه بگو چی می‌خوای؟');
     }
   });
 
@@ -251,25 +275,25 @@ export function createWorkerBot(env) {
     await ctx.answerCallbackQuery().catch(() => {});
 
     if (!entry) {
-      await ctx.reply('⌛ این لیست منقضی شده. لطفاً دوباره اسم آهنگ رو بفرست.');
+      await ctx.reply('این لیست قدیمی شده ⌛ اسم آهنگ رو دوباره بفرست.');
       return;
     }
     if (entry.chatId !== ctx.chat.id) return;
 
     if (indexOrAction === 'cancel') {
       await selectionStore.delete(token);
-      await ctx.editMessageText('❌ لغو شد. هر وقت خواستی اسم آهنگ بعدی رو بفرست 🎵');
+      await ctx.editMessageText('باشه، بی‌خیال این‌یکی 🙃 هر وقت آهنگ بعدی رو خواستی بفرست.');
       return;
     }
 
     const video = entry.videos[Number(indexOrAction)];
     if (!video) {
-      await ctx.reply('🤔 این گزینه معتبر نیست.');
+      await ctx.reply('این گزینه رو نفهمیدم 🤔 یه بار دیگه انتخاب کن.');
       return;
     }
 
     await selectionStore.delete(token);
-    await ctx.editMessageText(`✅ انتخاب شد: ${escapeHtml(truncate(video.title, 80))}`, {
+    await ctx.editMessageText(`✅ باشه، همین‌یکی: ${escapeHtml(truncate(video.title, 80))}`, {
       parse_mode: 'HTML',
     }).catch(() => {});
     await sendVideoFile(ctx, video);

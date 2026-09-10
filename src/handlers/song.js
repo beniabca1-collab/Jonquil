@@ -7,6 +7,14 @@ import { downloadThumbnail } from '../services/thumbnail.js';
 import { selectionStore } from '../services/selection-store.js';
 import { buildSelectionKeyboard } from '../keyboards.js';
 import { nextLore, loreSignoff } from '../services/lore.js';
+import {
+  searchingText,
+  foundText,
+  noOfficialText,
+  deliveredCaption,
+  stickerIds,
+  sendEphemeralSticker,
+} from '../services/persona.js';
 import { escapeHtml, truncate } from '../utils.js';
 import { TEMP_DIR, MAX_FILE_SIZE, MAX_DURATION_SECONDS, LORE_EDIT_MIN_MS, ensureTempDir } from '../config.js';
 
@@ -22,12 +30,12 @@ import { TEMP_DIR, MAX_FILE_SIZE, MAX_DURATION_SECONDS, LORE_EDIT_MIN_MS, ensure
 export async function handleSongRequest(ctx, rawQuery) {
   const query = cleanQuery(rawQuery);
   if (!query) {
-    await ctx.reply('🎵 لطفاً اسم آهنگ رو بنویس یا فایل صوتیش رو بفرست.');
+    await ctx.reply('یه اسم آهنگ بهم بده، منم مثل برق می‌رم دنبالش 🎧');
     return;
   }
 
   const status = await ctx.reply(
-    `🔎 دارم دنبال «${escapeHtml(truncate(query, 60))}» می‌گردم...\n\n${nextLore()}`,
+    searchingText(query, escapeHtml, truncate, nextLore),
     { parse_mode: 'HTML' }
   );
 
@@ -36,13 +44,13 @@ export async function handleSongRequest(ctx, rawQuery) {
     videos = await searchYouTube(query, 10);
   } catch {
     await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, '❌ جستجو در یوتیوب ناموفق بود. دوباره تلاش کن.')
+      .editMessageText(ctx.chat.id, status.message_id, 'اینترنت یوتیوب یه لحظه لجبازی کرد 😅 یه بار دیگه بفرست')
       .catch(() => {});
     return;
   }
   if (videos.length === 0) {
     await ctx.api
-      .editMessageText(ctx.chat.id, status.message_id, '😕 هیچ نتیجه‌ای پیدا نشد. اسم آهنگ رو دقیق‌تر بنویس.')
+      .editMessageText(ctx.chat.id, status.message_id, 'هیچی پیدا نکردم 😕 اسم آهنگ + خواننده رو دقیق‌تر بنویس، دوباره می‌گردم')
       .catch(() => {});
     return;
   }
@@ -50,11 +58,12 @@ export async function handleSongRequest(ctx, rawQuery) {
   // اگر در ۳ نتیجه‌ی اول موزیک ویدیوی رسمی بود → مستقیم ارسال
   const official = findOfficialVideo(videos.slice(0, 3));
   if (official) {
+    await sendEphemeralSticker(ctx, stickerIds().found, 9000).catch(() => {});
     await ctx.api
       .editMessageText(
         ctx.chat.id,
         status.message_id,
-        `🎬 موزیک ویدیو پیدا شد! دارم آماده‌اش می‌کنم...\n\n${nextLore()}`,
+        foundText(nextLore),
         { parse_mode: 'HTML' }
       )
       .catch(() => {});
@@ -72,11 +81,7 @@ export async function handleSongRequest(ctx, rawQuery) {
 
 async function showSelectionAlbum(ctx, statusMsgId, query, videos) {
   await ctx.api
-    .editMessageText(
-      ctx.chat.id,
-      statusMsgId,
-      '🎬 موزیک ویدیوی رسمی براش پیدا نکردم.\n⏳ چند تا ویدیوی مرتبط برات می‌فرستم که انتخاب کنی...'
-    )
+    .editMessageText(ctx.chat.id, statusMsgId, noOfficialText())
     .catch(() => {});
 
   const token = selectionStore.create(videos, ctx.chat.id);
@@ -112,14 +117,14 @@ async function showSelectionAlbum(ctx, statusMsgId, query, videos) {
   } catch (err) {
     console.error('sendMediaGroup error:', err.message);
     await ctx.reply(
-      '⚠️ ارسال تصاویر ناموفق بود؛ لیست متنی:\n\n' +
+      'تصویرها نیومدن 😅 اینم لیست متنی:\n\n' +
         videos.map((v, i) => `${i + 1}. ${v.title}\n${v.url}`).join('\n\n')
     );
   } finally {
     files.forEach((f) => fs.promises.unlink(f).catch(() => {}));
   }
 
-  await ctx.reply(`👇 کدوم رو برات بفرستم؟ («${escapeHtml(truncate(query, 40))}»)`, {
+  await ctx.reply(`ببین کدومش همونیه که تو ذهنته 👇 («${escapeHtml(truncate(query, 40))}»)`, {
     parse_mode: 'HTML',
     reply_markup: buildSelectionKeyboard(token, Math.min(videos.length, 10)),
   });
@@ -142,7 +147,7 @@ async function sendVideo(ctx, videoId) {
     info = await getVideoInfo(url);
   } catch (err) {
     console.error('getVideoInfo error:', err.message);
-    await ctx.reply(`❌ نتونستم اطلاعات ویدیو رو بگیرم 😕\nاما لینکش اینجاست:\n${url}`);
+    await ctx.reply(`نتونستم اطلاعاتش رو بخونم 😕\nاما لینکش اینجاست:\n${url}`);
     return;
   }
 
@@ -160,8 +165,8 @@ async function sendVideo(ctx, videoId) {
     `🎬 <b>${escapeHtml(truncate(title, 100))}</b>\n` +
     `🔗 ${url}` +
     (tooBig
-      ? '\n\n⚠️ این ویدیو برای ارسال فایل خیلی بزرگ/بلنده؛ فقط لینکش رو دارم.'
-      : '\n\n⏳ دارم ویدیو رو دانلود و ارسال می‌کنم...');
+      ? '\n\nاین‌یکی خیلی بزرگه و توی تلگرام جا نمی‌شه؛ فعلاً فقط لینکش رو دارم 🎬'
+      : '\n\n⏳ صبر کن، دارم میارمش...');
   await ctx.reply(linkText, { parse_mode: 'HTML' });
 
   if (tooBig) return;
@@ -169,7 +174,7 @@ async function sendVideo(ctx, videoId) {
   // ۲) دانلود و ارسال فایل ویدیو
   ensureTempDir();
   const filePath = path.join(TEMP_DIR, `video_${videoId}.mp4`);
-  const progressMsg = await ctx.reply(`${nextLore()}\n⏬ 0%`, { parse_mode: 'HTML' });
+  const progressMsg = await ctx.reply(`${nextLore()}\n⏬ دارم میارمش... 0%`, { parse_mode: 'HTML' });
   let lastPct = 0;
   let lastEditAt = Date.now();
 
@@ -195,21 +200,21 @@ async function sendVideo(ctx, videoId) {
     if (lastPct < 100) await renderProgress(100);
 
     await ctx.api
-      .editMessageText(ctx.chat.id, progressMsg.message_id, `${nextLore()}\n📤 در حال ارسال ویدیو...`, {
+      .editMessageText(ctx.chat.id, progressMsg.message_id, `${nextLore()}\n📤 تقریباً رسید...`, {
         parse_mode: 'HTML',
       })
       .catch(() => {});
 
     const size = fs.statSync(finalPath).size;
     if (size > MAX_FILE_SIZE) {
-      await ctx.reply('⚠️ حجم فایل از حد مجاز تلگرام بیشتر شد؛ لینک بالارو داری 🙏');
+      await ctx.reply('حجمش از سقف تلگرام رد شد 😅 لینکش بالاست، همونو ببین 🎬');
       return;
     }
 
     await ctx.replyWithVideo(
       new InputFile(finalPath, `${truncate(title, 60).replace(/[\\/:*?"<>|]/g, '')}.mp4`),
       {
-        caption: `🎬 ${escapeHtml(truncate(title, 200))}\n🔗 ${url}${loreSignoff()}`,
+        caption: `${deliveredCaption()}\n\n🎬 ${escapeHtml(truncate(title, 200))}\n🔗 ${url}${loreSignoff()}`,
         parse_mode: 'HTML',
         supports_streaming: true,
       }
@@ -221,7 +226,7 @@ async function sendVideo(ctx, videoId) {
       .editMessageText(
         ctx.chat.id,
         progressMsg.message_id,
-        '❌ دانلود/ارسال ویدیو ناموفق بود 😔\nلینکش بالاست، خودت می‌تونی ببینیش 🙏'
+        'نشد بیارمش 😔\nلینکش بالاست، همون رو ببین 🎬'
       )
       .catch(() => {});
   } finally {
@@ -241,25 +246,25 @@ export async function handleSelection(ctx) {
   await ctx.answerCallbackQuery().catch(() => {});
 
   if (!entry) {
-    await ctx.reply('⌛ این لیست منقضی شده. لطفاً دوباره اسم آهنگ رو بفرست.');
+    await ctx.reply('این لیست قدیمی شده ⌛ اسم آهنگ رو دوباره بفرست.');
     return;
   }
   if (entry.chatId !== ctx.chat.id) return;
 
   if (indexOrAction === 'cancel') {
     selectionStore.delete(token);
-    await ctx.editMessageText('❌ لغو شد. هر وقت خواستی اسم آهنگ بعدی رو بفرست 🎵');
+    await ctx.editMessageText('باشه، بی‌خیال این‌یکی 🙃 هر وقت آهنگ بعدی رو خواستی بفرست.');
     return;
   }
 
   const video = entry.videos[Number(indexOrAction)];
   if (!video) {
-    await ctx.reply('🤔 این گزینه معتبر نیست.');
+    await ctx.reply('این گزینه رو نفهمیدم 🤔 یه بار دیگه انتخاب کن.');
     return;
   }
 
   selectionStore.delete(token);
-  await ctx.editMessageText(`✅ انتخاب شد: ${escapeHtml(truncate(video.title, 80))}`, {
+  await ctx.editMessageText(`✅ باشه، همین‌یکی: ${escapeHtml(truncate(video.title, 80))}`, {
     parse_mode: 'HTML',
   }).catch(() => {});
   await sendVideo(ctx, video.videoId);
